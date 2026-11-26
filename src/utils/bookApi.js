@@ -1,6 +1,6 @@
 const GUTENDEX_BASE = "https://gutendex.com/books";
 const OPEN_LIBRARY_SEARCH = "https://openlibrary.org/search.json";
-const CATALOG_CACHE_KEY = "readwise_catalog_cache_v2";
+const CATALOG_CACHE_KEY = "readwise_catalog_cache_v3";
 
 // In-memory caches
 const pagesCache = new Map();
@@ -166,7 +166,7 @@ export function getBookCoverProxyUrl(book) {
 }
 
 /**
- * Client-side CORS-enabled Open Library cover lookup (works on static hosts too).
+ * Client-side CORS-enabled Open Library cover lookup (requires exact title match).
  */
 export async function resolveOpenLibraryCover(book) {
   const cleanTitle = (book?.title || "").split(/[;:]/)[0].trim();
@@ -178,13 +178,16 @@ export async function resolveOpenLibraryCover(book) {
   try {
     const url = `${OPEN_LIBRARY_SEARCH}?title=${encodeURIComponent(cleanTitle)}${
       book?.author ? `&author=${encodeURIComponent(book.author)}` : ""
-    }&limit=1&fields=cover_i`;
+    }&limit=5&fields=title,cover_i`;
     const res = await fetchWithTimeout(url, 6000);
     if (res.ok) {
       const data = await res.json();
-      const coverId = data.docs?.[0]?.cover_i;
-      if (coverId) {
-        const cover = `https://covers.openlibrary.org/b/id/${coverId}-M.jpg`;
+      const titleProbe = cleanTitle.toLowerCase().slice(0, 12);
+      const matched = (data.docs || []).find(
+        (d) => d.cover_i && d.title?.toLowerCase().includes(titleProbe)
+      );
+      if (matched?.cover_i) {
+        const cover = `https://covers.openlibrary.org/b/id/${matched.cover_i}-M.jpg`;
         olCoverCache.set(key, cover);
         return cover;
       }
@@ -368,7 +371,7 @@ function normalizeArchiveBook(doc) {
     archiveIdentifier: doc.identifier,
     title,
     author: authorName,
-    coverUrl: `https://archive.org/services/img/${doc.identifier}`,
+    coverUrl: generatedCover,
     generatedCover,
     synopsis: `${subject}. Downloaded ${
       doc.downloads?.toLocaleString() || "thousands of"
@@ -406,40 +409,40 @@ export const FALLBACK_POPULAR = [
   makeCuratedBook(11, "Alice's Adventures in Wonderland", "Lewis Carroll", "Fantasy. A young girl falls through a rabbit hole into a world of impossible adventures.", "Fantasy fiction", 8739200),
   makeCuratedBook(1661, "The Adventures of Sherlock Holmes", "Arthur Conan Doyle", "Detective fiction. Twelve classic cases solved by the world's greatest detective.", "Detective and mystery stories", 6717853),
   makeCuratedBook(2701, "Moby Dick", "Herman Melville", "Adventure. Captain Ahab's obsessive quest across the ocean for a great white whale.", "Whaling -- Fiction", 12621359),
-  makeCuratedBook(345, "Dracula", "Bram Stoker", "Gothic Horror. Count Dracula's attempt to move from Transylvania to England in this epistolary classic.", "Vampires -- Fiction", 8231990),
-  makeCuratedBook(174, "The Picture of Dorian Gray", "Oscar Wilde", "Philosophical Fiction. A young man stays forever youthful while his hidden portrait ages with every sin.", "Didactic fiction", 14561142),
-  makeCuratedBook(98, "A Tale of Two Cities", "Charles Dickens", "Historical Fiction. Love, sacrifice, and upheaval across London and Paris during the French Revolution.", "Historical fiction", 12650261),
-  makeCuratedBook(1260, "Jane Eyre", "Charlotte Brontë", "Gothic Romance. An orphaned governess uncovers dark secrets at Thornfield Hall.", "Love stories", 12622706),
-  makeCuratedBook(1400, "Great Expectations", "Charles Dickens", "Bildungsroman. Young Pip's journey from humble orphan to London gentleman.", "Bildungsromans", 12554815),
+  makeCuratedBook(345, "Dracula", "Bram Stoker", "Gothic Horror. Count Dracula's attempt to move from Transylvania to England in this epistolary classic.", "Vampires -- Fiction", 12216503),
+  makeCuratedBook(174, "The Picture of Dorian Gray", "Oscar Wilde", "Philosophical Fiction. A young man stays forever youthful while his hidden portrait ages with every sin.", "Didactic fiction", 295544),
+  makeCuratedBook(98, "A Tale of Two Cities", "Charles Dickens", "Historical Fiction. Love, sacrifice, and upheaval across London and Paris during the French Revolution.", "Historical fiction", 15074492),
+  makeCuratedBook(1260, "Jane Eyre", "Charlotte Brontë", "Gothic Romance. An orphaned governess uncovers dark secrets at Thornfield Hall.", "Love stories", 14751355),
+  makeCuratedBook(1400, "Great Expectations", "Charles Dickens", "Bildungsroman. Young Pip's journey from humble orphan to London gentleman.", "Bildungsromans", 7097513),
 ];
 
 export const FALLBACK_SCIFI = [
   makeCuratedBook(36, "The War of the Worlds", "H. G. Wells", "Science Fiction. Martians invade Earth in this groundbreaking science-fiction classic.", "Science fiction", 8228724),
   makeCuratedBook(35, "The Time Machine", "H. G. Wells", "Science Fiction. A Victorian inventor travels far into the future to discover humanity's fate.", "Science fiction", 8228723),
   makeCuratedBook(164, "Twenty Thousand Leagues Under the Sea", "Jules Verne", "Science Fiction. A thrilling underwater adventure aboard Captain Nemo's submarine.", "Science fiction", 8775179),
-  makeCuratedBook(103, "Around the World in Eighty Days", "Jules Verne", "Adventure. Phileas Fogg wagers he can circumnavigate the globe in eighty days.", "Voyages and travels", 12693112),
-  makeCuratedBook(18857, "A Journey to the Centre of the Earth", "Jules Verne", "Science Fiction. An expedition descends into volcanic tubes toward Earth's core.", "Science fiction", 8235314),
-  makeCuratedBook(139, "The Lost World", "Arthur Conan Doyle", "Adventure. Professor Challenger discovers living dinosaurs on a South American plateau.", "Science fiction", 8259516),
-  makeCuratedBook(62, "A Princess of Mars", "Edgar Rice Burroughs", "Planetary Romance. John Carter is mysteriously transported to an ancient, warring Mars.", "Science fiction", 8259028),
-  makeCuratedBook(5230, "The Invisible Man", "H. G. Wells", "Science Fiction. A scientist unlocks optical invisibility and slowly unravels into madness.", "Science fiction", 8228720),
+  makeCuratedBook(103, "Around the World in Eighty Days", "Jules Verne", "Adventure. Phileas Fogg wagers he can circumnavigate the globe in eighty days.", "Voyages and travels", 11531296),
+  makeCuratedBook(18857, "A Journey to the Centre of the Earth", "Jules Verne", "Science Fiction. An expedition descends into volcanic tubes toward Earth's core.", "Science fiction", 2105844),
+  makeCuratedBook(139, "The Lost World", "Arthur Conan Doyle", "Adventure. Professor Challenger discovers living dinosaurs on a South American plateau.", "Science fiction", 4083911),
+  makeCuratedBook(62, "A Princess of Mars", "Edgar Rice Burroughs", "Planetary Romance. John Carter is mysteriously transported to an ancient, warring Mars.", "Science fiction", 207226),
+  makeCuratedBook(5230, "The Invisible Man", "H. G. Wells", "Science Fiction. A scientist unlocks optical invisibility and slowly unravels into madness.", "Science fiction", 6419199),
 ];
 
 export const FALLBACK_MYSTERY = [
-  makeCuratedBook(43, "The Strange Case of Dr. Jekyll and Mr. Hyde", "Robert Louis Stevenson", "Gothic Mystery. A respected London doctor creates a potion that unleashes his darker self.", "Horror tales", 12645873),
-  makeCuratedBook(2852, "The Hound of the Baskervilles", "Arthur Conan Doyle", "Detective Mystery. Sherlock Holmes investigates an ancient family curse on the misty moors.", "Detective and mystery stories", 12536004),
-  makeCuratedBook(244, "A Study in Scarlet", "Arthur Conan Doyle", "Detective Fiction. The very first appearance of Sherlock Holmes and Dr. John Watson.", "Detective and mystery stories", 8231854),
-  makeCuratedBook(583, "The Woman in White", "Wilkie Collins", "Mystery Thriller. An eerie encounter on a moonlit London road leads to a web of identity and inheritance.", "Mystery fiction", 8241186),
-  makeCuratedBook(209, "The Turn of the Screw", "Henry James", "Ghost Story. A young governess fears supernatural forces are haunting two children at Bly Manor.", "Ghost stories", 8231995),
-  makeCuratedBook(1184, "The Count of Monte Cristo", "Alexandre Dumas", "Adventure & Revenge. Wrongfully imprisoned Edmond Dantès escapes to orchestrate an intricate reckoning.", "Adventure stories", 12630789),
+  makeCuratedBook(43, "The Strange Case of Dr. Jekyll and Mr. Hyde", "Robert Louis Stevenson", "Gothic Mystery. A respected London doctor creates a potion that unleashes his darker self.", "Horror tales", 295773),
+  makeCuratedBook(2852, "The Hound of the Baskervilles", "Arthur Conan Doyle", "Detective Mystery. Sherlock Holmes investigates an ancient family curse on the misty moors.", "Detective and mystery stories", 15277733),
+  makeCuratedBook(244, "A Study in Scarlet", "Arthur Conan Doyle", "Detective Fiction. The very first appearance of Sherlock Holmes and Dr. John Watson.", "Detective and mystery stories", 13405534),
+  makeCuratedBook(583, "The Woman in White", "Wilkie Collins", "Mystery Thriller. An eerie encounter on a moonlit London road leads to a web of identity and inheritance.", "Mystery fiction", 4684227),
+  makeCuratedBook(209, "The Turn of the Screw", "Henry James", "Ghost Story. A young governess fears supernatural forces are haunting two children at Bly Manor.", "Ghost stories", 181493),
+  makeCuratedBook(1184, "The Count of Monte Cristo", "Alexandre Dumas", "Adventure & Revenge. Wrongfully imprisoned Edmond Dantès escapes to orchestrate an intricate reckoning.", "Adventure stories", 15267475),
 ];
 
 export const FALLBACK_PHILOSOPHY = [
-  makeCuratedBook(2680, "Meditations", "Marcus Aurelius", "Stoic Philosophy. Private reflections on duty, resilience, and serenity by Rome's philosopher-emperor.", "Stoics", 12553205),
-  makeCuratedBook(1232, "The Prince", "Niccolò Machiavelli", "Political Philosophy. The definitive Renaissance treatise on statecraft and political power.", "Political science", 8231172),
-  makeCuratedBook(132, "The Art of War", "Sun Tzu", "Strategy. Ancient Chinese wisdom on leadership, planning, and conflict resolution.", "Military art and science", 12622726),
-  makeCuratedBook(1497, "The Republic", "Plato", "Classical Philosophy. Socrates explores justice, ethics, and the ideal society.", "Political science", 12649807),
-  makeCuratedBook(4363, "Beyond Good and Evil", "Friedrich Nietzsche", "Philosophy. A bold critique of traditional morality and the nature of truth.", "Philosophy", 8231215),
-  makeCuratedBook(205, "Walden", "Henry David Thoreau", "Transcendentalism. Two years of simple living and self-reliance beside Walden Pond.", "Solitude", 8231921),
+  makeCuratedBook(2680, "Meditations", "Marcus Aurelius", "Stoic Philosophy. Private reflections on duty, resilience, and serenity by Rome's philosopher-emperor.", "Stoics", 211529),
+  makeCuratedBook(1232, "The Prince", "Niccolò Machiavelli", "Political Philosophy. The definitive Renaissance treatise on statecraft and political power.", "Political science", 6603635),
+  makeCuratedBook(132, "The Art of War", "Sun Tzu", "Strategy. Ancient Chinese wisdom on leadership, planning, and conflict resolution.", "Military art and science", 4849549),
+  makeCuratedBook(1497, "The Republic", "Plato", "Classical Philosophy. Socrates explores justice, ethics, and the ideal society.", "Political science", 15051571),
+  makeCuratedBook(4363, "Beyond Good and Evil", "Friedrich Nietzsche", "Philosophy. A bold critique of traditional morality and the nature of truth.", "Philosophy", 14444933),
+  makeCuratedBook(205, "Walden", "Henry David Thoreau", "Transcendentalism. Two years of simple living and self-reliance beside Walden Pond.", "Solitude", 295408),
 ];
 
 export function getInitialCatalog() {
