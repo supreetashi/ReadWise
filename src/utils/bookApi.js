@@ -565,6 +565,27 @@ export async function searchBooks(query) {
   }
 }
 
+export function paginateParagraphs(paragraphs = [], maxWordsPerPage = 320) {
+  const pages = [];
+  let currentChunk = [];
+  let wordCount = 0;
+
+  for (const para of paragraphs) {
+    const words = para.split(/\s+/).length;
+    if (wordCount + words > maxWordsPerPage && currentChunk.length > 0) {
+      pages.push(currentChunk);
+      currentChunk = [para];
+      wordCount = words;
+    } else {
+      currentChunk.push(para);
+      wordCount += words;
+    }
+  }
+  if (currentChunk.length > 0) pages.push(currentChunk);
+
+  return pages.length > 0 ? pages : null;
+}
+
 // 3. Fetch & paginate real full book text
 export async function fetchBookPages(book) {
   if (!book?.textUrl && !book?.gutenbergId && !book?.archiveIdentifier) return null;
@@ -595,24 +616,8 @@ export async function fetchBookPages(book) {
     .map((p) => p.replace(/\r?\n/g, " ").trim())
     .filter((p) => p.length > 30);
 
-  const pages = [];
-  let currentChunk = [];
-  let wordCount = 0;
-
-  for (const para of paragraphs) {
-    const words = para.split(/\s+/).length;
-    if (wordCount + words > 320 && currentChunk.length > 0) {
-      pages.push(currentChunk);
-      currentChunk = [para];
-      wordCount = words;
-    } else {
-      currentChunk.push(para);
-      wordCount += words;
-    }
-  }
-  if (currentChunk.length > 0) pages.push(currentChunk);
-
-  if (pages.length > 0) {
+  const pages = paginateParagraphs(paragraphs);
+  if (pages) {
     pagesCache.set(cacheKey, pages);
     return pages;
   }

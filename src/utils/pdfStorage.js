@@ -18,7 +18,7 @@ function openDB() {
   });
 }
 
-export async function saveUploadedPdf(bookMeta, fileBlob) {
+export async function saveUploadedPdf(bookMeta, fileBlob = null) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
@@ -42,11 +42,12 @@ export async function getAllSavedPdfs() {
 
     request.onsuccess = () => {
       const records = request.result || [];
-      const booksWithUrls = records.map(({ fileBlob, ...meta }) => ({
+      const books = records.map(({ fileBlob, ...meta }) => ({
         ...meta,
-        pdfUrl: fileBlob ? URL.createObjectURL(fileBlob) : meta.pdfUrl,
+        // Keep fileBlob reference only for legacy records that predate pre-extracted pages
+        fileBlob: meta.pages ? null : fileBlob || null,
       }));
-      resolve(booksWithUrls);
+      resolve(books);
     };
     request.onerror = () => reject(request.error);
   });

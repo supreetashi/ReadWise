@@ -6,13 +6,13 @@ import { useReadingProgress } from "../hooks/useReadingProgress";
 import PacerBar from "../components/reader/PacerBar";
 import SelectionToolbar from "../components/reader/SelectionToolbar";
 import AISidebar from "../components/ai/AISidebar";
-import Viewer from "../components/reader/Viewer";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faArrowLeft,
   faWandMagicSparkles,
 } from "@fortawesome/free-solid-svg-icons";
 import { fetchBookPages } from "../utils/bookApi";
+import { extractPagesFromFile } from "../utils/pdfTextExtractor";
 
 export default function ReaderPage({ book, onBack }) {
   const textRef = useRef(null);
@@ -21,13 +21,20 @@ export default function ReaderPage({ book, onBack }) {
   const bookIdentifier = book?.id || book?.title || "default_book";
   const { progress, saveProgress } = useReadingProgress(bookIdentifier);
 
-  const [currentPage, setCurrentPage] = useState(progress.page || 1);
-  const [totalPages, setTotalPages] = useState(1);
+  const preloadedPages =
+    Array.isArray(book?.pages) && book.pages.length > 0 ? book.pages : null;
+
+  const [currentPage, setCurrentPage] = useState(
+    preloadedPages
+      ? Math.min(Math.max(1, progress.page || 1), preloadedPages.length)
+      : progress.page || 1
+  );
+  const [totalPages, setTotalPages] = useState(preloadedPages?.length || 1);
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [activeSnippet, setActiveSnippet] = useState(null);
   const [sidebarTab, setSidebarTab] = useState("ai");
 
-  // Real book text fetched from Gutenberg via bookApi
+  // Book text fetched from Gutenberg/mirrors or extracted from legacy uploaded PDF
   const [retryCount, setRetryCount] = useState(0);
   const [textState, setTextState] = useState({
     key: null,
@@ -38,17 +45,34 @@ export default function ReaderPage({ book, onBack }) {
   const { annotations, addAnnotation, updateNote, removeAnnotation } =
     useBookAnnotations(bookIdentifier);
 
-  const needsTextFetch = Boolean(!book?.pdfUrl && (book?.textUrl || book?.gutenbergId));
+  const needsExtract = Boolean(
+    !preloadedPages && (book?.fileBlob || book?.pdfUrl)
+  );
+  const needsTextFetch = Boolean(
+    !preloadedPages &&
+      !needsExtract &&
+      (book?.textUrl || book?.gutenbergId || book?.archiveIdentifier)
+  );
+  const needsAsyncLoad = needsExtract || needsTextFetch;
   const currentFetchKey = `${book?.id || ""}_${retryCount}`;
-  const textLoading = needsTextFetch && textState.key !== currentFetchKey;
-  const bookPages = textState.key === currentFetchKey ? textState.pages : null;
-  const textError = textState.key === currentFetchKey ? textState.error : null;
+  const textLoading = needsAsyncLoad && textState.key !== currentFetchKey;
+  const bookPages =
+    preloadedPages ||
+    (textState.key === currentFetchKey ? textState.pages : null);
+  const textError =
+    !preloadedPages && textState.key === currentFetchKey
+      ? textState.error
+      : null;
 
-  // Fetch real book text from Gutenberg / mirrors when a catalog book is opened
+  // Fetch catalog text or extract text from legacy uploaded PDF
   useEffect(() => {
-    if (!needsTextFetch) return;
+    if (!needsAsyncLoad) return;
     let cancelled = false;
-    fetchBookPages(book)
+    const loader = needsExtract
+      ? extractPagesFromFile(book.fileBlob || book.pdfUrl)
+      : fetchBookPages(book);
+
+    loader
       .then((pages) => {
         if (cancelled) return;
         if (pages) {
@@ -63,19 +87,21 @@ export default function ReaderPage({ book, onBack }) {
           });
         }
       })
-      .catch(() => {
+      .catch((err) => {
         if (!cancelled) {
           setTextState({
             key: currentFetchKey,
             pages: null,
-            error: "Failed to load book text from Project Gutenberg and mirrors. Please try again.",
+            error:
+              err?.message ||
+              "Failed to load book text. Please try again.",
           });
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [book, needsTextFetch, currentFetchKey]);
+  }, [book, needsAsyncLoad, needsExtract, currentFetchKey]);
 
   const handlePageEnd = useCallback(() => {
     setCurrentPage((prevPage) => {
@@ -103,18 +129,17 @@ export default function ReaderPage({ book, onBack }) {
   const { selectedText, selectedContext, toolbarPosition, clearSelection } =
     useTextSelection(textRef);
 
-  // Recalculate reading ruler line rects whenever plain-text pages load or page changes
+  // Recalculate reading ruler line rects whenever pages load or page changes
   useEffect(() => {
-    if (bookPages && !book?.pdfUrl) {
+    if (bookPages) {
       const frame = requestAnimationFrame(() => recalculate?.());
       return () => cancelAnimationFrame(frame);
     }
-  }, [bookPages, currentPage, book?.pdfUrl, recalculate]);
+  }, [bookPages, currentPage, recalculate]);
 
-  // Restore saved line index for plain-text catalog books on initial render
+  // Restore saved line index on initial render
   useEffect(() => {
     if (
-      !book?.pdfUrl &&
       !hasRestoredRef.current &&
       lineRects.length > 0 &&
       progress.lineIdx > 0
@@ -122,7 +147,7 @@ export default function ReaderPage({ book, onBack }) {
       hasRestoredRef.current = true;
       jumpToLine(Math.min(progress.lineIdx, lineRects.length - 1));
     }
-  }, [book?.pdfUrl, lineRects.length, progress.lineIdx, jumpToLine]);
+  }, [lineRects.length, progress.lineIdx, jumpToLine]);
 
   // Persist page, line index, WPM, and completion percentage automatically
   useEffect(() => {
@@ -156,16 +181,6 @@ export default function ReaderPage({ book, onBack }) {
     },
     [resetToStart]
   );
-
-  const handleTextLayerReady = useCallback(() => {
-    recalculate?.();
-    if (!hasRestoredRef.current && progress.lineIdx > 0) {
-      hasRestoredRef.current = true;
-      setTimeout(() => jumpToLine(progress.lineIdx), 60);
-    } else {
-      resetToStart();
-    }
-  }, [recalculate, resetToStart, jumpToLine, progress.lineIdx]);
 
   const handleContainerClick = (e) => {
     const selection = window.getSelection();
@@ -329,19 +344,7 @@ export default function ReaderPage({ book, onBack }) {
           By {book?.author || "Public Domain Author"}
         </p>
 
-        {book?.pdfUrl ? (
-          <Viewer
-            pdfUrl={book.pdfUrl}
-            currentPage={currentPage}
-            onPageChange={handlePageChange}
-            onDocumentLoad={(numPages) => setTotalPages(numPages)}
-            onContainerClick={handleContainerClick}
-            textContainerRef={textRef}
-            activeLine={activeLine}
-            progressX={progressX}
-            onTextLayerReady={handleTextLayerReady}
-          />
-        ) : textLoading ? (
+        {textLoading ? (
           <div className="text-center text-white/50 py-24 animate-pulse">
             Loading "{book?.title}"…
           </div>

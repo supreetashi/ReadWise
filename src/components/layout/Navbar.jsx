@@ -10,6 +10,8 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { useEffect, useState } from "react";
 import { saveUploadedPdf } from "../../utils/pdfStorage";
+import { extractPagesFromFile } from "../../utils/pdfTextExtractor";
+import { generateBookCoverSvg } from "../../utils/bookApi";
 
 export default function Navbar({ onUploadSuccess, searchQuery = "", onSearchChange }) {
   const [scrolled, setScrolled] = useState(false);
@@ -21,6 +23,8 @@ export default function Navbar({ onUploadSuccess, searchQuery = "", onSearchChan
   const [selectedFile, setSelectedFile] = useState(null);
   const [bookTitle, setBookTitle] = useState("");
   const [bookAuthor, setBookAuthor] = useState("");
+  const [extracting, setExtracting] = useState(false);
+  const [uploadError, setUploadError] = useState("");
 
   const scrollToSection = (id) => {
     onSearchChange?.("");
@@ -53,6 +57,8 @@ export default function Navbar({ onUploadSuccess, searchQuery = "", onSearchChan
     setSelectedFile(null);
     setBookTitle("");
     setBookAuthor("");
+    setUploadError("");
+    setExtracting(false);
   };
 
   const handleFileChange = (e) => {
@@ -61,34 +67,50 @@ export default function Navbar({ onUploadSuccess, searchQuery = "", onSearchChan
       setSelectedFile(file);
       setBookTitle(file.name.replace(/\.[^/.]+$/, ""));
       setBookAuthor("Uploaded Document");
+      setUploadError("");
     }
   };
 
   const handleConfirmUpload = async () => {
     if (!selectedFile) {
-      alert("Please select a PDF file first.");
+      setUploadError("Please select a PDF or TXT file first.");
       return;
     }
 
-    const bookMeta = {
-      id: `pdf_${Date.now()}`,
-      title: bookTitle || selectedFile.name,
-      author: bookAuthor || "Unknown Author",
-      coverUrl:
-        "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&q=80",
-      synopsis: "Uploaded PDF document.",
-      isUploaded: true,
-    };
+    setExtracting(true);
+    setUploadError("");
 
     try {
-      await saveUploadedPdf(bookMeta, selectedFile);
-    } catch (err) {
-      console.error("Failed to save PDF to IndexedDB:", err);
-    }
+      const pages = await extractPagesFromFile(selectedFile);
+      const title = bookTitle.trim() || selectedFile.name;
+      const author = bookAuthor.trim() || "Unknown Author";
+      const idNum = Date.now();
+      const generatedCover = generateBookCoverSvg(title, author, idNum);
 
-    const fileBlobUrl = URL.createObjectURL(selectedFile);
-    onUploadSuccess?.({ ...bookMeta, pdfUrl: fileBlobUrl });
-    handlePdfToggle();
+      const bookMeta = {
+        id: `doc_${idNum}`,
+        title,
+        author,
+        coverUrl: generatedCover,
+        generatedCover,
+        synopsis: `Uploaded document · ${pages.length} readable pages extracted.`,
+        pages,
+        isUploaded: true,
+      };
+
+      try {
+        await saveUploadedPdf(bookMeta);
+      } catch (err) {
+        console.error("Failed to save document to IndexedDB:", err);
+      }
+
+      onUploadSuccess?.(bookMeta);
+      handlePdfToggle();
+    } catch (err) {
+      setUploadError(err?.message || "Could not extract text from this file.");
+    } finally {
+      setExtracting(false);
+    }
   };
 
   return (
@@ -244,7 +266,7 @@ export default function Navbar({ onUploadSuccess, searchQuery = "", onSearchChan
             className="bg-[#15151A] w-full max-w-md p-6 rounded-2xl text-white border border-white/10 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-xl font-bold mb-4">Upload your PDF</h2>
+            <h2 className="text-xl font-bold mb-4">Upload your PDF or TXT</h2>
 
             <label className="h-44 border-2 border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-readflow-gold transition bg-white/[0.02]">
               <FontAwesomeIcon
@@ -252,18 +274,22 @@ export default function Navbar({ onUploadSuccess, searchQuery = "", onSearchChan
                 className="text-3xl text-readflow-gold/70 mb-2"
               />
               <p className="text-white/80 font-medium text-sm">
-                {selectedFile ? selectedFile.name : "Click to select a PDF"}
+                {selectedFile ? selectedFile.name : "Click to select a PDF or TXT file"}
               </p>
               <p className="text-xs text-white/40 mt-1">
-                {selectedFile ? "File selected" : "Maximum file size 50MB"}
+                {selectedFile ? "Text will be extracted for speed reading" : "Maximum file size 50MB"}
               </p>
               <input
                 type="file"
-                accept="application/pdf"
+                accept="application/pdf,.pdf,text/plain,.txt"
                 className="hidden"
                 onChange={handleFileChange}
               />
             </label>
+
+            {uploadError && (
+              <p className="mt-3 text-xs text-red-400">{uploadError}</p>
+            )}
 
             <input
               type="text"
@@ -285,17 +311,18 @@ export default function Navbar({ onUploadSuccess, searchQuery = "", onSearchChan
               <button
                 type="button"
                 onClick={handlePdfToggle}
-                className="flex-1 py-2.5 rounded-lg bg-white/10 hover:bg-white/15 text-sm transition cursor-pointer"
+                disabled={extracting}
+                className="flex-1 py-2.5 rounded-lg bg-white/10 hover:bg-white/15 text-sm transition cursor-pointer disabled:opacity-40"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleConfirmUpload}
-                disabled={!selectedFile}
+                disabled={!selectedFile || extracting}
                 className="flex-1 py-2.5 rounded-lg bg-readflow-primary hover:bg-red-700 disabled:opacity-40 text-sm font-semibold transition cursor-pointer"
               >
-                Open in Reader
+                {extracting ? "Extracting text…" : "Open in Reader"}
               </button>
             </div>
           </div>
