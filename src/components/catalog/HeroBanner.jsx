@@ -88,7 +88,7 @@ export default function HeroBanner({ featuredBooks = [], onStartReading }) {
                 />
 
                 {/* Dark overlay */}
-                <div className="absolute inset-0 bg-black/30" />
+                <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/55 to-black/40" />
 
                 {/* Left arrow */}
                 <button className="absolute left-4 top-1/2 -translate-y-1/2 z-20 text-white w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 p-2" onClick={handleLeft}>

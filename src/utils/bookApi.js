@@ -1,6 +1,6 @@
 const GUTENDEX_BASE = "https://gutendex.com/books";
 const OPEN_LIBRARY_SEARCH = "https://openlibrary.org/search.json";
-const CATALOG_CACHE_KEY = "readwise_catalog_cache_v3";
+const CATALOG_CACHE_KEY = "readwise_catalog_cache_v4";
 
 // In-memory caches
 const pagesCache = new Map();
@@ -384,18 +384,21 @@ function normalizeArchiveBook(doc) {
 }
 
 // ─── Curated instant catalog (shows immediately with 0ms loading delay) ─────
-function makeCuratedBook(gutenbergId, title, author, synopsis, subject, olCoverId = null) {
+function olCover(coverId) {
+  return `https://covers.openlibrary.org/b/id/${coverId}-M.jpg`;
+}
+
+function makeCuratedBook(gutenbergId, title, author, synopsis, subject, verifiedCoverUrl) {
   const generatedCover = generateBookCoverSvg(title, author, gutenbergId);
-  const olCover = olCoverId ? `https://covers.openlibrary.org/b/id/${olCoverId}-M.jpg` : null;
   return {
     id: `gutenberg_${gutenbergId}`,
     gutenbergId,
     title,
     author,
     coverUrl:
-      olCover ||
+      verifiedCoverUrl ||
       getBookCoverProxyUrl({ gutenbergId, title, author }) ||
-      `https://www.gutenberg.org/cache/epub/${gutenbergId}/pg${gutenbergId}.cover.medium.jpg`,
+      generatedCover,
     generatedCover,
     synopsis,
     textUrl: `https://www.gutenberg.org/files/${gutenbergId}/${gutenbergId}-0.txt`,
@@ -404,45 +407,45 @@ function makeCuratedBook(gutenbergId, title, author, synopsis, subject, olCoverI
 }
 
 export const FALLBACK_POPULAR = [
-  makeCuratedBook(84, "Frankenstein", "Mary Wollstonecraft Shelley", "Gothic Fiction. A scientist creates life and faces terrifying consequences in this landmark horror novel.", "Gothic fiction", 12355749),
-  makeCuratedBook(1342, "Pride and Prejudice", "Jane Austen", "Romance. A sharp-witted heroine navigates love, class, and society in Regency England.", "Love stories", 14348537),
-  makeCuratedBook(11, "Alice's Adventures in Wonderland", "Lewis Carroll", "Fantasy. A young girl falls through a rabbit hole into a world of impossible adventures.", "Fantasy fiction", 8739200),
-  makeCuratedBook(1661, "The Adventures of Sherlock Holmes", "Arthur Conan Doyle", "Detective fiction. Twelve classic cases solved by the world's greatest detective.", "Detective and mystery stories", 6717853),
-  makeCuratedBook(2701, "Moby Dick", "Herman Melville", "Adventure. Captain Ahab's obsessive quest across the ocean for a great white whale.", "Whaling -- Fiction", 12621359),
-  makeCuratedBook(345, "Dracula", "Bram Stoker", "Gothic Horror. Count Dracula's attempt to move from Transylvania to England in this epistolary classic.", "Vampires -- Fiction", 12216503),
-  makeCuratedBook(174, "The Picture of Dorian Gray", "Oscar Wilde", "Philosophical Fiction. A young man stays forever youthful while his hidden portrait ages with every sin.", "Didactic fiction", 295544),
-  makeCuratedBook(98, "A Tale of Two Cities", "Charles Dickens", "Historical Fiction. Love, sacrifice, and upheaval across London and Paris during the French Revolution.", "Historical fiction", 15074492),
-  makeCuratedBook(1260, "Jane Eyre", "Charlotte Brontë", "Gothic Romance. An orphaned governess uncovers dark secrets at Thornfield Hall.", "Love stories", 14751355),
-  makeCuratedBook(1400, "Great Expectations", "Charles Dickens", "Bildungsroman. Young Pip's journey from humble orphan to London gentleman.", "Bildungsromans", 7097513),
+  makeCuratedBook(84, "Frankenstein", "Mary Wollstonecraft Shelley", "Gothic Fiction. A scientist creates life and faces terrifying consequences in this landmark horror novel.", "Gothic fiction", "https://raw.githubusercontent.com/GITenberg/Frankenstein_84/master/cover.jpg"),
+  makeCuratedBook(1342, "Pride and Prejudice", "Jane Austen", "Romance. A sharp-witted heroine navigates love, class, and society in Regency England.", "Love stories", olCover(14348537)),
+  makeCuratedBook(11, "Alice's Adventures in Wonderland", "Lewis Carroll", "Fantasy. A young girl falls through a rabbit hole into a world of impossible adventures.", "Fantasy fiction", olCover(1123322)),
+  makeCuratedBook(1661, "The Adventures of Sherlock Holmes", "Arthur Conan Doyle", "Detective fiction. Twelve classic cases solved by the world's greatest detective.", "Detective and mystery stories", "https://raw.githubusercontent.com/GITenberg/The-Adventures-of-Sherlock-Holmes_1661/master/cover.jpg"),
+  makeCuratedBook(2701, "Moby Dick", "Herman Melville", "Adventure. Captain Ahab's obsessive quest across the ocean for a great white whale.", "Whaling -- Fiction", "https://raw.githubusercontent.com/GITenberg/Moby-Dick--Or-The-Whale_2701/master/cover.jpg"),
+  makeCuratedBook(345, "Dracula", "Bram Stoker", "Gothic Horror. Count Dracula's attempt to move from Transylvania to England in this epistolary classic.", "Vampires -- Fiction", "https://raw.githubusercontent.com/GITenberg/Dracula_345/master/cover.jpg"),
+  makeCuratedBook(174, "The Picture of Dorian Gray", "Oscar Wilde", "Philosophical Fiction. A young man stays forever youthful while his hidden portrait ages with every sin.", "Didactic fiction", olCover(295544)),
+  makeCuratedBook(98, "A Tale of Two Cities", "Charles Dickens", "Historical Fiction. Love, sacrifice, and upheaval across London and Paris during the French Revolution.", "Historical fiction", olCover(15074492)),
+  makeCuratedBook(1260, "Jane Eyre", "Charlotte Brontë", "Gothic Romance. An orphaned governess uncovers dark secrets at Thornfield Hall.", "Love stories", olCover(14751355)),
+  makeCuratedBook(1400, "Great Expectations", "Charles Dickens", "Bildungsroman. Young Pip's journey from humble orphan to London gentleman.", "Bildungsromans", olCover(7097513)),
 ];
 
 export const FALLBACK_SCIFI = [
-  makeCuratedBook(36, "The War of the Worlds", "H. G. Wells", "Science Fiction. Martians invade Earth in this groundbreaking science-fiction classic.", "Science fiction", 8228724),
-  makeCuratedBook(35, "The Time Machine", "H. G. Wells", "Science Fiction. A Victorian inventor travels far into the future to discover humanity's fate.", "Science fiction", 8228723),
-  makeCuratedBook(164, "Twenty Thousand Leagues Under the Sea", "Jules Verne", "Science Fiction. A thrilling underwater adventure aboard Captain Nemo's submarine.", "Science fiction", 8775179),
-  makeCuratedBook(103, "Around the World in Eighty Days", "Jules Verne", "Adventure. Phileas Fogg wagers he can circumnavigate the globe in eighty days.", "Voyages and travels", 11531296),
-  makeCuratedBook(18857, "A Journey to the Centre of the Earth", "Jules Verne", "Science Fiction. An expedition descends into volcanic tubes toward Earth's core.", "Science fiction", 2105844),
-  makeCuratedBook(139, "The Lost World", "Arthur Conan Doyle", "Adventure. Professor Challenger discovers living dinosaurs on a South American plateau.", "Science fiction", 4083911),
-  makeCuratedBook(62, "A Princess of Mars", "Edgar Rice Burroughs", "Planetary Romance. John Carter is mysteriously transported to an ancient, warring Mars.", "Science fiction", 207226),
-  makeCuratedBook(5230, "The Invisible Man", "H. G. Wells", "Science Fiction. A scientist unlocks optical invisibility and slowly unravels into madness.", "Science fiction", 6419199),
+  makeCuratedBook(36, "The War of the Worlds", "H. G. Wells", "Science Fiction. Martians invade Earth in this groundbreaking science-fiction classic.", "Science fiction", olCover(36314)),
+  makeCuratedBook(35, "The Time Machine", "H. G. Wells", "Science Fiction. A Victorian inventor travels far into the future to discover humanity's fate.", "Science fiction", olCover(9009316)),
+  makeCuratedBook(164, "Twenty Thousand Leagues Under the Sea", "Jules Verne", "Science Fiction. A thrilling underwater adventure aboard Captain Nemo's submarine.", "Science fiction", olCover(7063711)),
+  makeCuratedBook(103, "Around the World in Eighty Days", "Jules Verne", "Adventure. Phileas Fogg wagers he can circumnavigate the globe in eighty days.", "Voyages and travels", olCover(11531296)),
+  makeCuratedBook(18857, "A Journey to the Centre of the Earth", "Jules Verne", "Science Fiction. An expedition descends into volcanic tubes toward Earth's core.", "Science fiction", olCover(2105844)),
+  makeCuratedBook(139, "The Lost World", "Arthur Conan Doyle", "Adventure. Professor Challenger discovers living dinosaurs on a South American plateau.", "Science fiction", olCover(4083911)),
+  makeCuratedBook(62, "A Princess of Mars", "Edgar Rice Burroughs", "Planetary Romance. John Carter is mysteriously transported to an ancient, warring Mars.", "Science fiction", olCover(207226)),
+  makeCuratedBook(5230, "The Invisible Man", "H. G. Wells", "Science Fiction. A scientist unlocks optical invisibility and slowly unravels into madness.", "Science fiction", olCover(6419199)),
 ];
 
 export const FALLBACK_MYSTERY = [
-  makeCuratedBook(43, "The Strange Case of Dr. Jekyll and Mr. Hyde", "Robert Louis Stevenson", "Gothic Mystery. A respected London doctor creates a potion that unleashes his darker self.", "Horror tales", 295773),
-  makeCuratedBook(2852, "The Hound of the Baskervilles", "Arthur Conan Doyle", "Detective Mystery. Sherlock Holmes investigates an ancient family curse on the misty moors.", "Detective and mystery stories", 15277733),
-  makeCuratedBook(244, "A Study in Scarlet", "Arthur Conan Doyle", "Detective Fiction. The very first appearance of Sherlock Holmes and Dr. John Watson.", "Detective and mystery stories", 13405534),
-  makeCuratedBook(583, "The Woman in White", "Wilkie Collins", "Mystery Thriller. An eerie encounter on a moonlit London road leads to a web of identity and inheritance.", "Mystery fiction", 4684227),
-  makeCuratedBook(209, "The Turn of the Screw", "Henry James", "Ghost Story. A young governess fears supernatural forces are haunting two children at Bly Manor.", "Ghost stories", 181493),
-  makeCuratedBook(1184, "The Count of Monte Cristo", "Alexandre Dumas", "Adventure & Revenge. Wrongfully imprisoned Edmond Dantès escapes to orchestrate an intricate reckoning.", "Adventure stories", 15267475),
+  makeCuratedBook(43, "The Strange Case of Dr. Jekyll and Mr. Hyde", "Robert Louis Stevenson", "Gothic Mystery. A respected London doctor creates a potion that unleashes his darker self.", "Horror tales", olCover(295773)),
+  makeCuratedBook(2852, "The Hound of the Baskervilles", "Arthur Conan Doyle", "Detective Mystery. Sherlock Holmes investigates an ancient family curse on the misty moors.", "Detective and mystery stories", olCover(15277733)),
+  makeCuratedBook(244, "A Study in Scarlet", "Arthur Conan Doyle", "Detective Fiction. The very first appearance of Sherlock Holmes and Dr. John Watson.", "Detective and mystery stories", olCover(13405534)),
+  makeCuratedBook(583, "The Woman in White", "Wilkie Collins", "Mystery Thriller. An eerie encounter on a moonlit London road leads to a web of identity and inheritance.", "Mystery fiction", olCover(4684227)),
+  makeCuratedBook(209, "The Turn of the Screw", "Henry James", "Ghost Story. A young governess fears supernatural forces are haunting two children at Bly Manor.", "Ghost stories", olCover(181493)),
+  makeCuratedBook(1184, "The Count of Monte Cristo", "Alexandre Dumas", "Adventure & Revenge. Wrongfully imprisoned Edmond Dantès escapes to orchestrate an intricate reckoning.", "Adventure stories", olCover(15267475)),
 ];
 
 export const FALLBACK_PHILOSOPHY = [
-  makeCuratedBook(2680, "Meditations", "Marcus Aurelius", "Stoic Philosophy. Private reflections on duty, resilience, and serenity by Rome's philosopher-emperor.", "Stoics", 211529),
-  makeCuratedBook(1232, "The Prince", "Niccolò Machiavelli", "Political Philosophy. The definitive Renaissance treatise on statecraft and political power.", "Political science", 6603635),
-  makeCuratedBook(132, "The Art of War", "Sun Tzu", "Strategy. Ancient Chinese wisdom on leadership, planning, and conflict resolution.", "Military art and science", 4849549),
-  makeCuratedBook(1497, "The Republic", "Plato", "Classical Philosophy. Socrates explores justice, ethics, and the ideal society.", "Political science", 15051571),
-  makeCuratedBook(4363, "Beyond Good and Evil", "Friedrich Nietzsche", "Philosophy. A bold critique of traditional morality and the nature of truth.", "Philosophy", 14444933),
-  makeCuratedBook(205, "Walden", "Henry David Thoreau", "Transcendentalism. Two years of simple living and self-reliance beside Walden Pond.", "Solitude", 295408),
+  makeCuratedBook(2680, "Meditations", "Marcus Aurelius", "Stoic Philosophy. Private reflections on duty, resilience, and serenity by Rome's philosopher-emperor.", "Stoics", olCover(211529)),
+  makeCuratedBook(1232, "The Prince", "Niccolò Machiavelli", "Political Philosophy. The definitive Renaissance treatise on statecraft and political power.", "Political science", olCover(6603635)),
+  makeCuratedBook(132, "The Art of War", "Sun Tzu", "Strategy. Ancient Chinese wisdom on leadership, planning, and conflict resolution.", "Military art and science", olCover(4849549)),
+  makeCuratedBook(1497, "The Republic", "Plato", "Classical Philosophy. Socrates explores justice, ethics, and the ideal society.", "Political science", olCover(15051571)),
+  makeCuratedBook(4363, "Beyond Good and Evil", "Friedrich Nietzsche", "Philosophy. A bold critique of traditional morality and the nature of truth.", "Philosophy", olCover(14444933)),
+  makeCuratedBook(205, "Walden", "Henry David Thoreau", "Transcendentalism. Two years of simple living and self-reliance beside Walden Pond.", "Solitude", olCover(295408)),
 ];
 
 export function getInitialCatalog() {
