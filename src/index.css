@@ -1,0 +1,38 @@
+@import "tailwindcss";
+/* @config "../tailwind.config.js"; */
+
+body{
+  background-color: #0B0B0E;
+}
+
+@theme {
+  --color-readflow-dark: #0B0B0E;
+  --color-readflow-surface: #15151A;
+  --color-readflow-border: #2A1F24;
+  --color-readflow-primary: #B00710;
+  --color-readflow-gold: #E5C07B;
+  --color-readflow-textMuted: #9E9EA7;
+
+  --font-dancing: "Dancing Script", cursive;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0b0b0e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #B00710;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #5a3038;
+}
+
+::-webkit-scrollbar:horizontal {
+    display: none;
+}
