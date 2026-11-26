@@ -1,5 +1,6 @@
 const GUTENDEX_BASE = "https://gutendex.com/books";
 const OPEN_LIBRARY_SEARCH = "https://openlibrary.org/search.json";
+const CATALOG_CACHE_KEY = "readwise_catalog_cache_v2";
 
 // In-memory caches
 const pagesCache = new Map();
@@ -15,6 +16,17 @@ function fetchWithTimeout(url, ms = 12000) {
   );
 }
 
+/**
+ * GitHub Pages is static-only; local Vite dev and Vercel host /api/* endpoints.
+ */
+export function hasBackendApi() {
+  if (import.meta.env.DEV) return true;
+  if (typeof window !== "undefined" && window.location.hostname.endsWith("github.io")) {
+    return false;
+  }
+  return true;
+}
+
 function isValidBookText(text) {
   if (!text || text.length < 500) return false;
   const head = text.slice(0, 600);
@@ -24,9 +36,6 @@ function isValidBookText(text) {
   return true;
 }
 
-/**
- * Derive candidate GITenberg GitHub repo slugs from a book title.
- */
 function getGitenbergSlugCandidates(title = "") {
   const slugs = new Set();
   const toSlug = (s) =>
@@ -84,7 +93,35 @@ function pickBestArchiveTxtFile(files = [], gutenbergId = "") {
   );
 }
 
-async function fetchFromArchiveBrowser(gutenbergId, title) {
+async function fetchArchiveItemText(identifier, gutenbergId) {
+  const metaRes = await fetchWithTimeout(
+    `https://archive.org/metadata/${identifier}/files`,
+    6000
+  );
+  if (!metaRes.ok) return null;
+  const meta = await metaRes.json();
+  const txtFile = pickBestArchiveTxtFile(meta.result, gutenbergId);
+  if (!txtFile) return null;
+
+  const txtRes = await fetchWithTimeout(
+    `https://archive.org/download/${identifier}/${encodeURIComponent(txtFile.name)}`,
+    12000
+  );
+  if (!txtRes.ok) return null;
+  const text = await txtRes.text();
+  return isValidBookText(text) ? text : null;
+}
+
+async function fetchFromArchiveBrowser(gutenbergId, title, archiveIdentifier = null) {
+  if (archiveIdentifier) {
+    try {
+      const text = await fetchArchiveItemText(archiveIdentifier, gutenbergId);
+      if (text) return text;
+    } catch {
+      // fall through to search
+    }
+  }
+
   const queries = [];
   if (gutenbergId) {
     queries.push(`collection:gutenberg AND "gutenberg etext# ${gutenbergId}"`);
@@ -101,47 +138,19 @@ async function fetchFromArchiveBrowser(gutenbergId, title) {
       const searchUrl = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(
         query
       )}&fl[]=identifier&sort[]=downloads+desc&rows=2&output=json`;
-      const res = await fetchWithTimeout(searchUrl, 8000);
+      const res = await fetchWithTimeout(searchUrl, 7000);
       if (!res.ok) continue;
       const data = await res.json();
 
       for (const doc of data.response?.docs || []) {
-        const metaRes = await fetchWithTimeout(
-          `https://archive.org/metadata/${doc.identifier}/files`,
-          6000
-        );
-        if (!metaRes.ok) continue;
-        const meta = await metaRes.json();
-        const txtFile = pickBestArchiveTxtFile(meta.result, gutenbergId);
-        if (!txtFile) continue;
-
-        const txtRes = await fetchWithTimeout(
-          `https://archive.org/download/${doc.identifier}/${encodeURIComponent(
-            txtFile.name
-          )}`,
-          12000
-        );
-        if (txtRes.ok) {
-          const text = await txtRes.text();
-          if (isValidBookText(text)) return text;
-        }
+        const text = await fetchArchiveItemText(doc.identifier, gutenbergId);
+        if (text) return text;
       }
     } catch {
       // try next query
     }
   }
   return null;
-}
-
-/**
- * GitHub Pages is static-only; local Vite dev and Vercel host /api/* endpoints.
- */
-export function hasBackendApi() {
-  if (import.meta.env.DEV) return true;
-  if (typeof window !== "undefined" && window.location.hostname.endsWith("github.io")) {
-    return false;
-  }
-  return true;
 }
 
 /**
@@ -190,7 +199,7 @@ export async function resolveOpenLibraryCover(book) {
 /**
  * Fetch a Gutenberg book's plain text across dev/Vercel proxy + CORS-enabled mirrors.
  */
-async function fetchGutenbergTextString(rawUrl, gutenbergId, title) {
+async function fetchGutenbergTextString(rawUrl, gutenbergId, title, archiveIdentifier = null) {
   // 1. Vite dev middleware or Vercel serverless /api/book-text
   if (hasBackendApi()) {
     const params = new URLSearchParams();
@@ -215,7 +224,7 @@ async function fetchGutenbergTextString(rawUrl, gutenbergId, title) {
   // 2. Direct GITenberg raw mirror (CORS-enabled)
   for (const url of getGitHubRawUrls(gutenbergId, title)) {
     try {
-      const r = await fetchWithTimeout(url, 10000);
+      const r = await fetchWithTimeout(url, 9000);
       if (r.ok) {
         const text = await r.text();
         if (isValidBookText(text)) return text;
@@ -226,7 +235,7 @@ async function fetchGutenbergTextString(rawUrl, gutenbergId, title) {
   }
 
   // 3. Direct Internet Archive Gutenberg collection (CORS-enabled)
-  const iaText = await fetchFromArchiveBrowser(gutenbergId, title);
+  const iaText = await fetchFromArchiveBrowser(gutenbergId, title, archiveIdentifier);
   if (iaText) return iaText;
 
   // 4. Public CORS proxies as last resort
@@ -336,15 +345,52 @@ function normalizeGutendexBook(item) {
   };
 }
 
-// ─── Static fallback books ────────────────────────────────────────────────────
-function makeFallbackBook(gutenbergId, title, author, synopsis, subject) {
+function normalizeArchiveBook(doc) {
+  const callNum = Array.isArray(doc.call_number) ? doc.call_number[0] : doc.call_number || "";
+  const idMatch = String(callNum).match(/(\d+)/);
+  const gutenbergId = idMatch ? Number(idMatch[1]) : null;
+  const rawCreator = Array.isArray(doc.creator) ? doc.creator[0] : doc.creator || "Classic Author";
+  const authorName = rawCreator
+    .replace(/,\s*\d{4}-(\d{4})?/g, "")
+    .split(",")
+    .reverse()
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(" ") || "Classic Author";
+
+  const title = doc.title || "Untitled Classic";
+  const generatedCover = generateBookCoverSvg(title, authorName, gutenbergId || 0);
+  const subject = Array.isArray(doc.subject) ? doc.subject[0] : doc.subject || "Classic Literature";
+
+  return {
+    id: gutenbergId ? `gutenberg_${gutenbergId}` : `ia_${doc.identifier}`,
+    gutenbergId,
+    archiveIdentifier: doc.identifier,
+    title,
+    author: authorName,
+    coverUrl: `https://archive.org/services/img/${doc.identifier}`,
+    generatedCover,
+    synopsis: `${subject}. Downloaded ${
+      doc.downloads?.toLocaleString() || "thousands of"
+    } times via Project Gutenberg Archive.`,
+    textUrl: gutenbergId
+      ? `https://www.gutenberg.org/files/${gutenbergId}/${gutenbergId}-0.txt`
+      : null,
+    subjects: Array.isArray(doc.subject) ? doc.subject : subject ? [subject] : [],
+  };
+}
+
+// ─── Curated instant catalog (shows immediately with 0ms loading delay) ─────
+function makeCuratedBook(gutenbergId, title, author, synopsis, subject, olCoverId = null) {
   const generatedCover = generateBookCoverSvg(title, author, gutenbergId);
+  const olCover = olCoverId ? `https://covers.openlibrary.org/b/id/${olCoverId}-M.jpg` : null;
   return {
     id: `gutenberg_${gutenbergId}`,
     gutenbergId,
     title,
     author,
     coverUrl:
+      olCover ||
       getBookCoverProxyUrl({ gutenbergId, title, author }) ||
       `https://www.gutenberg.org/cache/epub/${gutenbergId}/pg${gutenbergId}.cover.medium.jpg`,
     generatedCover,
@@ -355,104 +401,145 @@ function makeFallbackBook(gutenbergId, title, author, synopsis, subject) {
 }
 
 export const FALLBACK_POPULAR = [
-  makeFallbackBook(
-    84,
-    "Frankenstein",
-    "Mary Wollstonecraft Shelley",
-    "Gothic Fiction. A scientist creates life and faces terrifying consequences in this landmark horror novel.",
-    "Gothic fiction"
-  ),
-  makeFallbackBook(
-    1342,
-    "Pride and Prejudice",
-    "Jane Austen",
-    "Romance. A sharp-witted heroine navigates love, class, and society in Regency England.",
-    "Love stories"
-  ),
-  makeFallbackBook(
-    11,
-    "Alice's Adventures in Wonderland",
-    "Lewis Carroll",
-    "Fantasy. A young girl falls through a rabbit hole into a world of impossible adventures.",
-    "Fantasy fiction"
-  ),
-  makeFallbackBook(
-    1661,
-    "The Adventures of Sherlock Holmes",
-    "Arthur Conan Doyle",
-    "Detective fiction. Twelve classic cases solved by the world's greatest detective.",
-    "Detective and mystery stories"
-  ),
-  makeFallbackBook(
-    2701,
-    "Moby Dick",
-    "Herman Melville",
-    "Adventure. Captain Ahab's obsessive quest across the ocean for a great white whale.",
-    "Whaling -- Fiction"
-  ),
+  makeCuratedBook(84, "Frankenstein", "Mary Wollstonecraft Shelley", "Gothic Fiction. A scientist creates life and faces terrifying consequences in this landmark horror novel.", "Gothic fiction", 12355749),
+  makeCuratedBook(1342, "Pride and Prejudice", "Jane Austen", "Romance. A sharp-witted heroine navigates love, class, and society in Regency England.", "Love stories", 14348537),
+  makeCuratedBook(11, "Alice's Adventures in Wonderland", "Lewis Carroll", "Fantasy. A young girl falls through a rabbit hole into a world of impossible adventures.", "Fantasy fiction", 8739200),
+  makeCuratedBook(1661, "The Adventures of Sherlock Holmes", "Arthur Conan Doyle", "Detective fiction. Twelve classic cases solved by the world's greatest detective.", "Detective and mystery stories", 6717853),
+  makeCuratedBook(2701, "Moby Dick", "Herman Melville", "Adventure. Captain Ahab's obsessive quest across the ocean for a great white whale.", "Whaling -- Fiction", 12621359),
+  makeCuratedBook(345, "Dracula", "Bram Stoker", "Gothic Horror. Count Dracula's attempt to move from Transylvania to England in this epistolary classic.", "Vampires -- Fiction", 8231990),
+  makeCuratedBook(174, "The Picture of Dorian Gray", "Oscar Wilde", "Philosophical Fiction. A young man stays forever youthful while his hidden portrait ages with every sin.", "Didactic fiction", 14561142),
+  makeCuratedBook(98, "A Tale of Two Cities", "Charles Dickens", "Historical Fiction. Love, sacrifice, and upheaval across London and Paris during the French Revolution.", "Historical fiction", 12650261),
+  makeCuratedBook(1260, "Jane Eyre", "Charlotte Brontë", "Gothic Romance. An orphaned governess uncovers dark secrets at Thornfield Hall.", "Love stories", 12622706),
+  makeCuratedBook(1400, "Great Expectations", "Charles Dickens", "Bildungsroman. Young Pip's journey from humble orphan to London gentleman.", "Bildungsromans", 12554815),
 ];
 
 export const FALLBACK_SCIFI = [
-  makeFallbackBook(
-    36,
-    "The War of the Worlds",
-    "H. G. Wells",
-    "Science Fiction. Martians invade Earth in this groundbreaking science-fiction classic.",
-    "Science fiction"
-  ),
-  makeFallbackBook(
-    35,
-    "The Time Machine",
-    "H. G. Wells",
-    "Science Fiction. A Victorian inventor travels far into the future to discover humanity's fate.",
-    "Science fiction"
-  ),
-  makeFallbackBook(
-    164,
-    "Twenty Thousand Leagues Under the Sea",
-    "Jules Verne",
-    "Science Fiction. A thrilling underwater adventure aboard Captain Nemo's submarine.",
-    "Science fiction"
-  ),
-  makeFallbackBook(
-    1232,
-    "The Prince",
-    "Niccolò Machiavelli",
-    "Political Philosophy. The definitive Renaissance guide to statecraft and political power.",
-    "Political science"
-  ),
+  makeCuratedBook(36, "The War of the Worlds", "H. G. Wells", "Science Fiction. Martians invade Earth in this groundbreaking science-fiction classic.", "Science fiction", 8228724),
+  makeCuratedBook(35, "The Time Machine", "H. G. Wells", "Science Fiction. A Victorian inventor travels far into the future to discover humanity's fate.", "Science fiction", 8228723),
+  makeCuratedBook(164, "Twenty Thousand Leagues Under the Sea", "Jules Verne", "Science Fiction. A thrilling underwater adventure aboard Captain Nemo's submarine.", "Science fiction", 8775179),
+  makeCuratedBook(103, "Around the World in Eighty Days", "Jules Verne", "Adventure. Phileas Fogg wagers he can circumnavigate the globe in eighty days.", "Voyages and travels", 12693112),
+  makeCuratedBook(18857, "A Journey to the Centre of the Earth", "Jules Verne", "Science Fiction. An expedition descends into volcanic tubes toward Earth's core.", "Science fiction", 8235314),
+  makeCuratedBook(139, "The Lost World", "Arthur Conan Doyle", "Adventure. Professor Challenger discovers living dinosaurs on a South American plateau.", "Science fiction", 8259516),
+  makeCuratedBook(62, "A Princess of Mars", "Edgar Rice Burroughs", "Planetary Romance. John Carter is mysteriously transported to an ancient, warring Mars.", "Science fiction", 8259028),
+  makeCuratedBook(5230, "The Invisible Man", "H. G. Wells", "Science Fiction. A scientist unlocks optical invisibility and slowly unravels into madness.", "Science fiction", 8228720),
 ];
+
+export const FALLBACK_MYSTERY = [
+  makeCuratedBook(43, "The Strange Case of Dr. Jekyll and Mr. Hyde", "Robert Louis Stevenson", "Gothic Mystery. A respected London doctor creates a potion that unleashes his darker self.", "Horror tales", 12645873),
+  makeCuratedBook(2852, "The Hound of the Baskervilles", "Arthur Conan Doyle", "Detective Mystery. Sherlock Holmes investigates an ancient family curse on the misty moors.", "Detective and mystery stories", 12536004),
+  makeCuratedBook(244, "A Study in Scarlet", "Arthur Conan Doyle", "Detective Fiction. The very first appearance of Sherlock Holmes and Dr. John Watson.", "Detective and mystery stories", 8231854),
+  makeCuratedBook(583, "The Woman in White", "Wilkie Collins", "Mystery Thriller. An eerie encounter on a moonlit London road leads to a web of identity and inheritance.", "Mystery fiction", 8241186),
+  makeCuratedBook(209, "The Turn of the Screw", "Henry James", "Ghost Story. A young governess fears supernatural forces are haunting two children at Bly Manor.", "Ghost stories", 8231995),
+  makeCuratedBook(1184, "The Count of Monte Cristo", "Alexandre Dumas", "Adventure & Revenge. Wrongfully imprisoned Edmond Dantès escapes to orchestrate an intricate reckoning.", "Adventure stories", 12630789),
+];
+
+export const FALLBACK_PHILOSOPHY = [
+  makeCuratedBook(2680, "Meditations", "Marcus Aurelius", "Stoic Philosophy. Private reflections on duty, resilience, and serenity by Rome's philosopher-emperor.", "Stoics", 12553205),
+  makeCuratedBook(1232, "The Prince", "Niccolò Machiavelli", "Political Philosophy. The definitive Renaissance treatise on statecraft and political power.", "Political science", 8231172),
+  makeCuratedBook(132, "The Art of War", "Sun Tzu", "Strategy. Ancient Chinese wisdom on leadership, planning, and conflict resolution.", "Military art and science", 12622726),
+  makeCuratedBook(1497, "The Republic", "Plato", "Classical Philosophy. Socrates explores justice, ethics, and the ideal society.", "Political science", 12649807),
+  makeCuratedBook(4363, "Beyond Good and Evil", "Friedrich Nietzsche", "Philosophy. A bold critique of traditional morality and the nature of truth.", "Philosophy", 8231215),
+  makeCuratedBook(205, "Walden", "Henry David Thoreau", "Transcendentalism. Two years of simple living and self-reliance beside Walden Pond.", "Solitude", 8231921),
+];
+
+export function getInitialCatalog() {
+  try {
+    const raw = localStorage.getItem(CATALOG_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.popular?.length >= 10) return parsed;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return {
+    popular: FALLBACK_POPULAR,
+    scifi: FALLBACK_SCIFI,
+    mystery: FALLBACK_MYSTERY,
+    philosophy: FALLBACK_PHILOSOPHY,
+  };
+}
+
+export function saveCatalogCache(catalog) {
+  try {
+    localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(catalog));
+  } catch {
+    // ignore quota errors
+  }
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
-// 1. Fetch popular public-domain books
+// 1. Fetch public-domain books (fast 5s Gutendex + fast Archive.org fallback)
 export async function fetchCatalogBooks(topic = "", page = 1) {
   const params = new URLSearchParams({ page: String(page) });
   if (topic) params.set("topic", topic);
 
-  const res = await fetchWithTimeout(`${GUTENDEX_BASE}?${params.toString()}`);
-  if (!res.ok) throw new Error("Failed to fetch catalog books");
+  try {
+    const res = await fetchWithTimeout(`${GUTENDEX_BASE}?${params.toString()}`, 5000);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.results?.length > 0) {
+        return data.results.map(normalizeGutendexBook);
+      }
+    }
+  } catch {
+    // Gutendex timed out or unavailable — fall back cleanly to Archive.org
+  }
 
-  const data = await res.json();
-  return (data.results || []).map(normalizeGutendexBook);
+  // Fast Archive.org Gutenberg collection fallback (~1s response, CORS-enabled)
+  const topicFilter = topic ? ` AND subject:("${topic}")` : "";
+  const iaQuery = `collection:gutenberg AND mediatype:texts AND language:eng${topicFilter}`;
+  const iaUrl = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(
+    iaQuery
+  )}&fl[]=identifier,title,creator,downloads,subject,call_number&sort[]=downloads+desc&rows=20&page=${page}&output=json`;
+
+  const iaRes = await fetchWithTimeout(iaUrl, 7000);
+  if (!iaRes.ok) throw new Error("Failed to fetch catalog books");
+  const iaData = await iaRes.json();
+  return (iaData.response?.docs || []).map(normalizeArchiveBook);
 }
 
-// 2. Search books
+// 2. Search books across Gutendex, Internet Archive Gutenberg, and Open Library
 export async function searchBooks(query) {
   if (!query?.trim()) return [];
+  const q = query.trim();
 
-  const res = await fetchWithTimeout(
-    `${GUTENDEX_BASE}?search=${encodeURIComponent(query.trim())}`
-  );
-  if (!res.ok) throw new Error("Search failed");
+  try {
+    const res = await fetchWithTimeout(
+      `${GUTENDEX_BASE}?search=${encodeURIComponent(q)}`,
+      5000
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (data.results?.length > 0) {
+        return data.results.slice(0, 20).map(normalizeGutendexBook);
+      }
+    }
+  } catch {
+    // Gutendex timed out — try Archive.org Gutenberg search next
+  }
 
-  const data = await res.json();
-  if (data.results?.length > 0) {
-    return data.results.slice(0, 20).map(normalizeGutendexBook);
+  try {
+    const iaQuery = `collection:gutenberg AND mediatype:texts AND (${q})`;
+    const iaUrl = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(
+      iaQuery
+    )}&fl[]=identifier,title,creator,downloads,subject,call_number&sort[]=downloads+desc&rows=18&output=json`;
+    const iaRes = await fetchWithTimeout(iaUrl, 6000);
+    if (iaRes.ok) {
+      const iaData = await iaRes.json();
+      const docs = iaData.response?.docs || [];
+      if (docs.length > 0) {
+        return docs.map(normalizeArchiveBook);
+      }
+    }
+  } catch {
+    // fall through to Open Library
   }
 
   try {
     const olRes = await fetchWithTimeout(
-      `${OPEN_LIBRARY_SEARCH}?q=${encodeURIComponent(query.trim())}&limit=15&fields=key,title,author_name,cover_i,first_sentence`
+      `${OPEN_LIBRARY_SEARCH}?q=${encodeURIComponent(q)}&limit=15&fields=key,title,author_name,cover_i,first_sentence`,
+      6000
     );
     const olData = await olRes.json();
     return (olData.docs || []).map((doc) => ({
@@ -474,7 +561,7 @@ export async function searchBooks(query) {
 
 // 3. Fetch & paginate real full book text
 export async function fetchBookPages(book) {
-  if (!book?.textUrl && !book?.gutenbergId) return null;
+  if (!book?.textUrl && !book?.gutenbergId && !book?.archiveIdentifier) return null;
 
   const cacheKey = book.id || book.textUrl;
   if (pagesCache.has(cacheKey)) {
@@ -484,7 +571,8 @@ export async function fetchBookPages(book) {
   let rawText = await fetchGutenbergTextString(
     book.textUrl,
     book.gutenbergId,
-    book.title
+    book.title,
+    book.archiveIdentifier || null
   );
 
   // Strip Project Gutenberg header & footer

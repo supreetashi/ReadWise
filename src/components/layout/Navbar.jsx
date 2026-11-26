@@ -11,15 +11,27 @@ import {
 import { useEffect, useState } from "react";
 import { saveUploadedPdf } from "../../utils/pdfStorage";
 
-export default function Navbar({ onUploadSuccess }) {
+export default function Navbar({ onUploadSuccess, searchQuery = "", onSearchChange }) {
   const [scrolled, setScrolled] = useState(false);
   const [searchIcon, setSearchIcon] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [uploadPdf, setUploadPdf] = useState(false);
 
   // File upload state
   const [selectedFile, setSelectedFile] = useState(null);
   const [bookTitle, setBookTitle] = useState("");
   const [bookAuthor, setBookAuthor] = useState("");
+
+  const scrollToSection = (id) => {
+    onSearchChange?.("");
+    setTimeout(() => {
+      if (!id) {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } else {
+        document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 30);
+  };
 
   useEffect(() => {
     const handleScroll = () => {
@@ -90,18 +102,30 @@ export default function Navbar({ onUploadSuccess }) {
         }`}
       >
         <div className="flex items-center justify-center gap-10">
-          <div className="text-2xl sm:text-2xl md:text-3xl lg:text-4xl font-semibold text-readflow-primary font-dancing cursor-pointer">
+          <div
+            onClick={() => scrollToSection(null)}
+            className="text-2xl sm:text-2xl md:text-3xl lg:text-4xl font-semibold text-readflow-primary font-dancing cursor-pointer"
+          >
             ReadWise
           </div>
           <div className="hidden sm:flex items-center gap-5">
-            <button className="px-4 py-2 rounded-xl bg-white/20 text-white hover:bg-white/30 cursor-pointer">
+            <button
+              onClick={() => scrollToSection("library")}
+              className="px-4 py-2 rounded-xl bg-white/20 text-white hover:bg-white/30 cursor-pointer"
+            >
               My Library
             </button>
-            <button className="px-4 py-2 rounded-xl bg-white/20 text-white hover:bg-white/30 cursor-pointer">
+            <button
+              onClick={() => scrollToSection("genres")}
+              className="px-4 py-2 rounded-xl bg-white/20 text-white hover:bg-white/30 cursor-pointer"
+            >
               Genre
             </button>
-            <button className="px-4 py-2 rounded-xl bg-white/20 text-white hover:bg-white/30 cursor-pointer">
-              Authors
+            <button
+              onClick={() => scrollToSection("trending")}
+              className="px-4 py-2 rounded-xl bg-white/20 text-white hover:bg-white/30 cursor-pointer"
+            >
+              Classics
             </button>
           </div>
         </div>
@@ -113,9 +137,11 @@ export default function Navbar({ onUploadSuccess }) {
           <div className="flex items-center">
             <input
               type="text"
-              placeholder="Search Book"
+              placeholder="Search Book or Author..."
+              value={searchQuery}
+              onChange={(e) => onSearchChange?.(e.target.value)}
               className={`ml-2 bg-transparent border-b border-white text-white outline-none transition-all duration-300 ${
-                searchIcon ? "w-50 opacity-100" : "w-0 opacity-0"
+                searchIcon || searchQuery ? "w-52 opacity-100" : "w-0 opacity-0"
               }`}
             />
             <button
@@ -147,23 +173,64 @@ export default function Navbar({ onUploadSuccess }) {
         </div>
       </nav>
 
+      {/* Mobile Search Bar */}
+      {mobileSearchOpen && (
+        <div className="fixed top-16 left-4 right-4 z-50 sm:hidden bg-[#15151A]/95 backdrop-blur-md border border-white/15 rounded-xl px-4 py-2.5 flex items-center gap-2 shadow-xl">
+          <FontAwesomeIcon icon={faMagnifyingGlass} className="text-white/50 text-sm" />
+          <input
+            type="text"
+            autoFocus
+            placeholder="Search books or authors..."
+            value={searchQuery}
+            onChange={(e) => onSearchChange?.(e.target.value)}
+            className="flex-1 bg-transparent text-sm text-white outline-none"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => onSearchChange?.("")}
+              className="text-xs text-white/60 hover:text-white"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Mobile Bottom Navbar */}
       <nav className="fixed bottom-4 left-4 right-4 z-50 sm:hidden bg-[#242326]/95 backdrop-blur-md rounded-full px-5 py-3 border border-white/10 flex items-center justify-around">
-        <button className="flex flex-col items-center text-white gap-1">
+        <button
+          onClick={() => {
+            setMobileSearchOpen(false);
+            scrollToSection(null);
+          }}
+          className="flex flex-col items-center text-white gap-1"
+        >
           <FontAwesomeIcon icon={faHouse} className="text-xl" />
           <span className="text-xs">Home</span>
         </button>
-        <button className="flex flex-col items-center text-white/60 gap-1">
+        <button
+          onClick={() => {
+            setMobileSearchOpen(false);
+            scrollToSection("library");
+          }}
+          className="flex flex-col items-center text-white/60 gap-1"
+        >
           <FontAwesomeIcon icon={faBookOpen} className="text-xl" />
           <span className="text-xs">Library</span>
         </button>
-        <button className="flex flex-col items-center text-white/60 gap-1">
+        <button
+          onClick={() => setMobileSearchOpen((prev) => !prev)}
+          className="flex flex-col items-center text-white/60 gap-1"
+        >
           <FontAwesomeIcon icon={faMagnifyingGlass} className="text-xl" />
           <span className="text-xs">Search</span>
         </button>
-        <button className="flex flex-col items-center text-white/60 gap-1">
+        <button
+          onClick={handlePdfToggle}
+          className="flex flex-col items-center text-white/60 gap-1"
+        >
           <FontAwesomeIcon icon={faUser} className="text-xl" />
-          <span className="text-xs">Profile</span>
+          <span className="text-xs">Upload</span>
         </button>
       </nav>
 
